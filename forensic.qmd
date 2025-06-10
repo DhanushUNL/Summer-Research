@@ -1,0 +1,75 @@
+---
+title: "basics of forensic"
+author: "Dhanushka"
+format: html
+editor: visual
+---
+
+## x3pTools package basics
+
+### Loading images and converting them to a data frame, "x3p_to_df" function
+
+```{r}
+
+library(tidyverse)
+library(x3ptools)
+
+logo <- read_x3p(system.file("csafe-logo.x3p", package = "x3ptools"))
+print(logo)
+
+## objects in logo image data. 
+outputs_logo <- names(logo)
+outputs_logo
+
+## summary of the variables in the dataframe
+summary_logo <- logo %>% 
+  x3p_to_df() %>% 
+  summary()
+
+## generate the image using ggplot, geom_point
+sample_img_B_G <- logo %>% 
+  x3p_to_df() %>% 
+  ggplot(aes(x = x, y = y, colour = value)) +geom_point() +scale_color_gradient(low = "blue", high = "green") + theme_minimal()
+
+print(sample_img_B_G)
+
+```
+
+### Dealing with sample of data points to generate images ("x3p_sample" function)
+
+```{r}
+
+## x3p_sample function
+
+sample_df <-  logo %>% 
+  x3p_sample(m = 6) %>%
+  x3p_to_df() %>% 
+  ggplot(aes(x = x, y = y, color = value)) + geom_point() +
+  scale_color_gradient(low = "green", high = "darkblue")
+
+print(sample_df)
+```
+
+## bulletxtrctr package basics
+
+```{r}
+devtools::install_github("heike/bulletxtrctr")
+```
+
+```{r}
+
+devtools::install_github("heike/bulletxtrctr")
+
+library(randomForest)
+library(bulletxtrctr)
+
+# note: length(hamby252demo[[1]]) is 6
+br1_b1 <- read_bullet(urllist = hamby252demo[[1]]) %>% # x3p_m_to_mum: converts from meters to microns
+mutate(x3p = x3p %>% purrr::map(.f = x3p_m_to_mum)) %>% # rotate_x3p(angle = -90: change orientation by 90 degrees clockwise
+# y_flip_x3p: flip image to conform to new ISO norm (see ??y_flip_x3p)
+mutate(x3p = x3p %>% purrr::map(.f = function(x) x %>% rotate_x3p(angle = -90) %>% 
+    y_flip_x3p()))
+
+
+
+```
