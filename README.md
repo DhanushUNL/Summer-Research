@@ -97,3 +97,21 @@ Anyways, i will look into other methods available for detecting outliers such as
 Also, want to apply the method 1, to all the images and see how it works. ***Question is, how can i evaluate the method?***
 
 `Maybe` i will Look forward to fit a 3D plane to the surface and analyze the residuals as an alternative approach.
+
+### How we evaluate?
+
+The question is, should we need to look at higher lagged differences? That means, according to the previous example, it seemed that detected dust spots at lag 20 and 25 are almost appeared to be the same. Hence, its reasonable to consider only lag 20, rather than taking the lagged differences at lag 25 or higher.
+
+Assumption : at higher lags, the diff operator only captures the larger dust spots.
+
+Idea :
+
+-   obtain the coordinates of the possible dust particles from the filtered images using the method 1 (discussed earlier) at a certain lag. store them in separate data frames.
+
+-   Then combine all those coordinates (data frames) of each filtered image (lags, 5, 10,15,20, 25) ——\> use inner_join()
+
+    -   Calculate the dimension ratio for each data frame such that,
+
+        $$\text{proportion of coordinates} = \frac{\#\text{ of coordinates in combined data frame}}{\#\text{ of coordinates in lag } i \text{ data frame}}$$
+
+    -   Can draw a graph and pick the lag by using the elbow method.
