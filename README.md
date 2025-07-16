@@ -115,3 +115,18 @@ Idea :
         $$\text{proportion of coordinates} = \frac{\#\text{ of coordinates in combined data frame}}{\#\text{ of coordinates in lag } i \text{ data frame}}$$
 
     -   Can draw a graph and pick the lag by using the elbow method.
+
+## July 16 - July 23
+
+Previous evaluation method will not be useful. So, we suggest Density Based Clustering method (DBSCAN) to detect the locations, radius and other information.
+
+Mainly, For each scan, I need to summarize the dust information into a data-frame that contains,
+
+1.  Locations (x, y coordinates of the center of the dust spot)
+2.  Radius (size of the dust spot, assuming the dust spots are circular)
+3.  Dust labels.
+4.  Lag ( lag that detected the dust spot)
+5.  actual x coordinate value.
+6.  actual intensity value of the center of the dust spot.
+
+Task : add all the images to the fo loop you created and proceed.
