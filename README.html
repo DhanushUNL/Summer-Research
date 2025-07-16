@@ -136,6 +136,87 @@ for one gel type)</p>
 <li><p>Also in the process of reviewing R materials.</p></li>
 </ul>
 </div>
+<div id="june-19---24" class="section level2">
+<h2>June 19 - 24</h2>
+<ul>
+<li><p>Applied the <code>Gaussian, Maximum, Sum</code> filters on images
+to see if it is possible to distinguish the dust from the striation
+marks. ===&gt; Didn’t go well. couldn’t identify any.</p>
+<ul>
+<li>Gaussian filter = <em>A <strong>Gaussian filter</strong> is a
+linear, low-pass filter commonly used in image processing for
+<strong>smoothing</strong> and <strong>noise reduction</strong>. there
+are several parameters, specially, <code>d = distance parameter</code>
+(under the Gaussian</em> filter it is referred as the <strong>standard
+deviation</strong> (<code>in microns)</code> of the Gaussian kernel
+function. Smaller the d value, less blurry the image. <strong>Note
+:</strong> <em>When you increase the d-value, we significantly lose
+dimension (some pixels) from the original image as well.</em></li>
+</ul></li>
+<li><p>Applied the diff() operation on images (basically, to the surface
+matrix) at different lags and ended up deciding lag 5 is suitable as it
+recreate the scans with out the striations.
+<code>(Because the main objective is to identify the dust)</code></p>
+<ul>
+<li>This diff() operator, essentially calculates how much each pixel
+differs from the one lag ( lag =1 if we want to see the differences of
+adjacent cells in pixels ) units apart it.</li>
+</ul></li>
+<li><p>Then tried to apply the filters (focal maps defined above) to
+these <code>differenced</code> images at <code>lag 5</code>.</p></li>
+<li><p>I was able to come up with a method to detect the dust particles
+on a image by obtaining the positive outliers of the values of the
+images after taking lagged differences at lag = 5.</p>
+<ul>
+<li><p>That is, use the Q3 + 1.5 IQR as the cut off value in detecting
+the positive outliers that could be dust. (higher values indicates
+spikes/bumps)</p></li>
+<li><p>Then by taking their cell numbers and respective coordinates, we
+can plot those points on top of the raster image (image that was
+filtered by applying diff(lag =5). And the results were pretty good.
+However, it captures other bumps on the images as dust, which could be a
+very tiny bump that is there because of the non-uniformity of the
+surface of the image.</p></li>
+<li><p>Therefore, its required to detect a better threshold/cut off to
+detect only probable dust spots on the image.</p></li>
+</ul></li>
+</ul>
+</div>
+<div id="june-25---july-1" class="section level2">
+<h2>June 25 - July 1</h2>
+<p>Look at the detected dust particles at higher lagged differences of
+the raster image.</p>
+<ul>
+<li><p>And it is observed that, when the lag is increased ( used lag =
+10, lag =15 , 20 and 25), the above suggested method only captures the
+larger dust spots. (with out changing the method of taking the cut
+off)</p></li>
+<li><p>Unfortunately, couldn’t find any difference after filtering the
+images (already filtered taking the lagged differences) using, max and
+Gaussian filters.</p></li>
+<li><p>Tried the method on several images and it seems the method works
+pretty well.</p></li>
+</ul>
+<p>Lets call this method as <strong>Method 01</strong>.</p>
+</div>
+<div id="july-2---july-9" class="section level2">
+<h2>July 2 - July 9</h2>
+<p>I think we don’t need to detect a certain threshold for all the
+images as for each image, <code>Q3 + 1.5IQR</code> of the values can be
+taken as a good threshold of its own.</p>
+<p>And since the values of these images (surface matrices) are very
+small and the surface is not being as smooth as it seems, its hard to
+come up with a one universal threshold value that can detect the dust
+particles (bumps).</p>
+<p>Anyways, i will look into other methods available for detecting
+outliers such as standardization , modified z score (use median and
+median absolute differences) and etc.</p>
+<p>Also, want to apply the method 1, to all the images and see how it
+works. <strong><em>Question is, how can i evaluate the
+method?</em></strong></p>
+<p><code>Maybe</code> i will Look forward to fit a 3D plane to the
+surface and analyze the residuals as an alternative approach.</p>
+</div>
 </div>
 </section>
 
