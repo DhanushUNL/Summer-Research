@@ -10,7 +10,8 @@ editor: visual
 ```{r, message=FALSE, warning=FALSE}
 
 library(pacman)
-p_load(tidyverse, ggplot2, terra, x3ptools, prettydoc, sf, raster,lsa, cluster )
+p_load(tidyverse, ggplot2, terra, x3ptools, prettydoc, sf, raster,lsa, cluster,
+       dbscan)
 
 
 ```
@@ -329,14 +330,9 @@ bumps_006_lag5 <- bx_006_lag5$out[bx_006_lag5$out>0]
 indexes_006_lag5 <- which(values(r_006_lag5) %in% bumps_006_lag5 )
 coord_outliers_006_lag5 <- xyFromCell(r_006_lag5, indexes_006_lag5)
 
-
-# coord_outliers
-
-plot(r_006_lag5, main ="After Diff-filter")
-points(coord_outliers_006_lag5, col= "red", cex =1.1, pch =20)
-
 ## side by side plot to compare
 par(mfcol = c(1,2))
+
 plot(r_006_lag5, main ="After Diff-filter")
 
 plot(r_006_lag5, main ="After Diff-filter with identified Dust")
@@ -421,7 +417,7 @@ par(mfcol = c(1,2))
 plot(r_006_lag5, main ="After Diff-filter with identified Dust")
 points(coord_outliers_006_lag5, col= "red", cex =1.1, pch =20)
 
-plot(r_006, main ="After Diff-filter with identified Dust, with upadted points")
+plot(r_006, main ="Unfiltered imgage with identified Dust (with upadted points)")
 points(updated_coord_006_lag5, col= "red", cex =1.1, pch =20)
 
 
@@ -434,7 +430,7 @@ Here, i found that when the lag size is increased, the previously detected small
 
 **Here, i am plotting the dust spots on the filtered raster object, not on the unfiltered original raster object. So, I'm not updating the coordinates based on the lost dimensions.**
 
-```{r, message=FALSE,warning=FALSE}
+```{r, message=FALSE,warning=FALSE, eval=FALSE, include=FALSE}
 
 ############################### apply the diff at lag 5 ###########################
 
@@ -581,20 +577,22 @@ Strategy : assume that each dust spot is circular. Obtain the coordinate of the 
 
 We will be using 5, 10, 15, 20, 25 as lags ( And we expect that the method only detects larger dust spots at higher lags.)
 
-**Here in the following code chunk, we only use lag 15 for convenience (because it only contains several dust spots compared to lower lags.**
+**Here in the following code chunk, we only use lag 15 for convenience on `scan-006` (because it only contains several dust spots compared to lower lags.**
 
 Also, i will not be changing the resolution of raster objects as it gets more complicated. (i.e, once i change the resolution into microns, x, y coordinates will be interchaged and also can not plot it due to its high resolution using the plot function. `res(r_006) <- c(3.5277e-03, 3.5277e-03)`
 
-```{r, message=FALSE, warning=FALSE}
-## use the 1st as an example
+```{r, message=FALSE, warning=FALSE, eval=FALSE, include=FALSE}
+## use the 1st image (scan-006) as an example
 
 ## reset the images
 
 img_list_use <- img_list
 
+## obtain x,y coordinates using x3p ( here pixel sizes are different compared to a raster image)
 xy_coord_sys <- img_list_use$`scan-006.x3p` %>% 
   x3p_to_df() 
 
+## convert to a raster object
 r_006 <- rast(t(img_list_use$`scan-006.x3p`$surface.matrix))
 
 ## create a dataframe that has all the coordinates and intensity values corresponds to each x,y coordinate of the original scan-006
@@ -628,7 +626,7 @@ Apply Density based clustering algorithm on the dust spots detected in scan 006 
 
 ### Try to figure out the optimal parameters in DBSCAN for a certain lag for the scan 006
 
-```{r, warning=FALSE, message=FALSE}
+```{r, warning=FALSE, message=FALSE, eval=FALSE, include=FALSE}
 library(dbscan)
 library(cluster)
 ## reset images
@@ -678,7 +676,6 @@ best <- results %>%
 
 best
 
-
 results %>% 
   mutate(min_pts = as.factor(minPts)) %>% 
   ggplot(aes(eps, silhouette, color = min_pts)) +
@@ -690,18 +687,15 @@ results %>%
 
 ```
 
-Based on this tuning, we can assume that `eps = 5` and ,`minPnt = 2` gives the best results. The following is just a demo to see how the DBSCAN works.
+Based on this tuning, we can assume that `eps = 5` and ,`minPnt = 2` gives the best results.
+
+**The following is just a demo to see how the DBSCAN works. Later, we will be using the correct summary measures when calculating centers and radius.**
 
 ```{r, message=FALSE, warning=FALSE}
 
-
-library(sp)
-library(sf)
-library(dbscan)
-library(tibble)
-
-
+## specify the number of lags 
 lags <- c(5, 10, 15, 20, 25)
+
 dust_df <- list()
 
 for (i in lags) {
@@ -738,7 +732,7 @@ for (i in lags) {
   cluster <- dbscan::dbscan(coords, eps = eps_val, minPts = minPts)
 
   ## Create a data frame of results
-  df_clustered <- as.data.frame(updated_coords) %>%
+  df_clustered <- as.data.frame(coords) %>%
     mutate(label = cluster$cluster) %>% 
     filter(label != 0)  ## remove noise points
 
@@ -755,6 +749,8 @@ for (i in lags) {
 
   dust_df[[as.character(i)]] <- cluster_summary
 }
+
+
 
 
 ```
@@ -781,11 +777,13 @@ Here, we will use the intensity values as well in finding the clusters. and also
 
 Further, i am only using 2d distances to calculate the radius values. (can use 3d distances too, but might not be able to plot them)
 
-```{r}
+```{r, message=FALSE, warning=FALSE}
 
 lags <- c(5, 10, 15, 20, 25)
 dust_df <- list()
 
+## this list is used for the analysis of noise points.
+cluster_list <- list()
 for (i in lags) {
   ## Reset image
   img_list_use <- img_list
@@ -825,9 +823,8 @@ for (i in lags) {
 
   ## Assign labels to clusters
   df_clustered <- as.data.frame(coords_3d) %>%
-    #mutate(original_x = x + i) %>% 
-    mutate(label = cluster$cluster) %>% 
-    filter(label != 0)  ## remove noise
+    mutate(label = cluster$cluster)
+    
   
   if (nrow(df_clustered) == 0) next
 
@@ -841,11 +838,13 @@ for (i in lags) {
     ## use the euclidine distance to get the radius.(max distance)
     radius = max(sqrt((x - x[which.max(z)])^2 + (y - y[which.max(z)])^2)),
     .groups = "drop") %>%
-    mutate(lag = i)
+    mutate(lag = i) %>% 
+    filter(label != 0)
 
   
   ## Store result
   dust_df[[as.character(i)]] <- cluster_summary
+  cluster_list[[as.character(i)]] <- df_clustered
 }
 
 
@@ -853,7 +852,7 @@ for (i in lags) {
 
 ## Combining the two data frames to get the original intensity values corresponding to each center coordinate.
 
-```{r}
+```{r, message=FALSE, warning=FALSE}
 
 ## I have to update the x coordinates because i need original x ccordinates corresponding to each dust spot. 
 
@@ -947,18 +946,90 @@ points(final_df_006_updated_lag25$center_x, final_df_006_updated_lag25$center_y,
 symbols(final_df_006_updated_lag25$center_x, final_df_006_updated_lag25$center_y, circles = final_df_006_updated_lag25$radius, inches = FALSE, add = TRUE, fg = "red")
 ```
 
-## Continue the methods, the direction of rows (y) 
+Analysis of noise-points detected by DBSCAN algorithm
 
-```{r}
+```{r, warning=FALSE, message=FALSE}
+
+
+############################ analysis of noise points ############################
+## Lag 5
+
+label_0_lg5_006 <- cluster_list[1] %>% 
+  as.data.frame() %>% 
+  filter(X5.label == 0) %>% 
+  mutate(X5.x = X5.x + 5) %>% 
+  rename("x" = X5.x, "y" = X5.y, "label_lag5" = X5.label) %>% 
+  inner_join(all_coord_val_r_006_unfiltered, by = c("x", "y") )
+  
+
+plot(r_006)
+points(label_0_lg5_006$x, label_0_lg5_006$y, col = "red")
+
+## lag 10
+
+label_0_lg10_006 <- cluster_list[2] %>% 
+  as.data.frame() %>% 
+  filter(X10.label == 0) %>% 
+  mutate(X10.x = X10.x + 10) %>% 
+  rename("x" = X10.x, "y" = X10.y, "label_lag5" = X10.label) %>% 
+  inner_join(all_coord_val_r_006_unfiltered, by = c("x", "y") )
+  
+
+plot(r_006)
+points(label_0_lg10_006$x, label_0_lg10_006$y, col = "red")
+
+
+## lag 15
+
+label_0_lg15_006 <- cluster_list[3] %>% 
+  as.data.frame() %>% 
+  filter(X15.label == 0) %>% 
+  mutate(X15.x = X15.x + 10) %>% 
+  rename("x" = X15.x, "y" = X15.y, "label_lag5" = X15.label) %>% 
+  inner_join(all_coord_val_r_006_unfiltered, by = c("x", "y") )
+  
+
+plot(r_006)
+points(label_0_lg15_006$x, label_0_lg15_006$y, col = "red")
+
+## lag 20
+
+label_0_lg20_006 <- cluster_list[4] %>% 
+  as.data.frame() %>% 
+  filter(X20.label == 0) %>% 
+  mutate(X20.x = X20.x + 10) %>% 
+  rename("x" = X20.x, "y" = X20.y, "label_lag5" = X20.label) %>% 
+  inner_join(all_coord_val_r_006_unfiltered, by = c("x", "y") )
+  
+
+plot(r_006)
+points(label_0_lg20_006$x, label_0_lg20_006$y, col = "red")
+
+## lag 25 (no noise points detected)
+
+label_0_lg25_006 <- cluster_list[5] %>% 
+  as.data.frame() %>% 
+  filter(X25.label == 0) %>% 
+  mutate(X25.x = X25.x + 10) %>% 
+  rename("x" = X25.x, "y" = X25.y, "label_lag5" = X25.label) %>% 
+  inner_join(all_coord_val_r_006_unfiltered, by = c("x", "y") )
+  
+
+plot(r_006)
+points(label_0_lg25_006$x, label_0_lg25_006$y, col = "red")
+```
+
+You can see that, for higher lags, number of noise points detected by the DBSCAN method is dcreasing. And almost all of these noise points are around the cliff area in the scan..
+
+## Continue the methods, the direction of rows (y)
+
+```{r, message=FALSE, warning=FALSE}
 lags <- c(5, 10, 15, 20, 25)
 dust_df_rows <- list()
 
 for (i in lags) {
   ## Reset image
   img_list_use <- img_list
-
-  ## Apply diff filter at the current lag (column-wise of the original scan)
-  ## img_list_use$`scan-006.x3p`$surface.matrix <- t(diff(t(img_list_use$`scan-006.x3p`$surface.matrix), lag = i))
   
   ## apply the filter on row-wise again. 
   img_list_use$`scan-006.x3p`$surface.matrix <- diff(img_list_use$`scan-006.x3p`$surface.matrix, lag=i)
@@ -1020,7 +1091,7 @@ for (i in lags) {
 
 ## Combining the two data frames to get the original intensity values corresponding to each center coordinate.
 
-```{r}
+```{r, message=FALSE, warning=FALSE}
 ## I have to update the x coordinates because i need original x ccordinates corresponding to each dust spot. 
 
 final_df_006_rows <- bind_rows(dust_df_rows) %>%
@@ -1123,297 +1194,477 @@ symbols(final_df_006_updated_lag25_rows$center_x, final_df_006_updated_lag25_row
 
 As you can observe, this is really messy.
 
-### Use simple filters (high-pass) - Suggested by Heike and Susan
+## Apply the method after filtering both row-wise and column-wise
 
-```{r}
+Note that, filtering on rows 1st and columns 2nd is as same filtering of columns 1st and rows second. And in this methods, the algorithm detected lots of points as dust spots, **not good**.
 
-library(terra)
+```{r, message=FALSE, warning=FALSE}
+lags <- c(5, 10, 15, 20, 25)
+dust_df_rows_col <- list()
 
-img_list_use <- img_list
-r_006 <- rast(t(img_list_use$`scan-006.x3p`$surface.matrix))
+for (i in lags) {
+  ## Reset image
+  img_list_use <- img_list
 
+  ## apply the filter on row-wise again. 
+  img_list_use$`scan-006.x3p`$surface.matrix <- diff(img_list_use$`scan-006.x3p`$surface.matrix, lag=i)
+  
+    ## Apply diff filter at the current lag (column-wise of the original scan)
+ img_list_use$`scan-006.x3p`$surface.matrix <- t(diff(t(img_list_use$`scan-006.x3p`$surface.matrix), lag = i))
+ 
+  ##create a raster object from the filtered scan. 
+  r_filtered <- rast(t(img_list_use$`scan-006.x3p`$surface.matrix))
+  
+  ## find positive outliers (dust spots)
+  bx <- boxplot(values(r_filtered), plot = FALSE)
+  bumps <- bx$out[bx$out > 0]
+  ## identify the cell numbers of the dust spots
+  idx <- which(values(r_filtered) %in% bumps)
+  
+  # Skip if no outliers
+  if (length(idx) == 0) next
+  
+  ## Coordinates and the corresponding z-values (intensity) of the filtered image
+  coords_xy <- xyFromCell(r_filtered, idx)
+  
+  ## obtain the filtered intensity values from the the filtered raster
+  z_vals <- values(r_filtered)[idx]
+  
+  ## Combine x, y, z to  make a dataframe
+  coords_3d <- cbind(coords_xy, z = z_vals)
 
-# 5x5 mean kernel
-maxkernel_3x3 <- matrix(1, 3, 3)
-#mean_kernel <- mean_kernel / sum(mean_kernel)
+  ## apply DBSCAN clustering on (x, y, z) coordinates.
+  ## select some abritrary values for parameters 
+  eps_val <- 5  
+  minPts <- 2
+  cluster <- dbscan::dbscan(coords_3d, eps = eps_val, minPts = minPts)
 
-# Low-pass version, no dimension reduction
-r_blurred <- focal(r_006, w = maxkernel_3x3, fun = max, na.policy = "omit")
+  ## Assign labels to clusters
+  df_clustered <- as.data.frame(coords_3d) %>%
+    #mutate(original_x = x + i) %>% 
+    mutate(label = cluster$cluster) %>% 
+    filter(label != 0)  ## remove noise
+  
+  if (nrow(df_clustered) == 0) next
 
-plot(r_blurred)
-# High-pass: enhances sharp bumps (dust)
-r_highpass <-  r_blurred - r_006
-plot(r_highpass)
-
-# Get values
-vals_hp <- values(r_highpass)
-
-# Use boxplot to find outliers
-bx_hp <- boxplot(vals_hp, plot = FALSE)
-threshold <- bx_hp$stats[5]
-
-# Create binary raster of outliers(this is also a raster with T/F as intensities)
-r_outliers <- r_highpass > threshold
-plot(r_outliers)
-
-
-# Optional: visualize
-plot(r_highpass, main = "High-Pass Filtered Image")
-plot(r_outliers, main = "Outlier Pixels")
-
-
-# Convert terra object to raster
-raster_outliers <- raster(r_outliers)
-
-# Use clump from raster
-r_dust_labels <- clump(raster_outliers, directions = 8)
-
-plot(r_dust_labels)
-
-
-# Convert to data frame
-df_dust_pixels <- as.data.frame(r_dust_labels, xy = TRUE, na.rm = TRUE)
-names(df_dust_pixels)[3] <- "label"
-
-# Add intensity values from original or highpass raster
-df_dust_pixels$intensity_highpass <- extract(r_highpass, df_dust_pixels[, c("x", "y")])[,2]
-
-df_dust_pixels$intensity_original <- extract(r_006, df_dust_pixels[, c("x", "y")])[,2]
-
-library(dplyr)
-
-dust_summary <- df_dust_pixels %>%
+  cluster_summary <- df_clustered %>%
   group_by(label) %>%
   summarise(
-    center_x = x[which.max(intensity_original)],
-    center_y = y[which.max(intensity_original)],
-    center_z = max(intensity_original),
-    n_pixels = n(),
-    radius = sqrt(n_pixels / pi),
-    .groups = "drop"
-  )
+    ## use the corresponding coordinates of the maximum z value of each dust spot as the center of a particular dust spot which is a cluster here. 
+    center_x = x[which.max(z)],
+    center_y = y[which.max(z)],
+    center_z = max(z),
+    ## use the euclidine distance to get the radius.(max distance)
+    radius = max(sqrt((x - x[which.max(z)])^2 + (y - y[which.max(z)])^2)),
+    .groups = "drop") %>%
+    mutate(lag = i)
 
-plot(r_006, main = "Detected Dust Spots from High-Pass Filter")
-points(dust_summary$center_x, dust_summary$center_y, pch = 20, col = "blue", cex = 1.2)
-symbols(dust_summary$center_x, dust_summary$center_y,
-        circles = dust_summary$radius, add = TRUE, fg = "red")
+  
+  ## Store result
+  dust_df_rows_col[[as.character(i)]] <- cluster_summary
+}
+
+
 ```
 
-\
+### Updating the x and y coordinates and combining the corresponding original intensity values
 
-```{r}
+```{r, warning=FALSE, message=FALSE}
 
-library(terra)
+## I have to update the x coordinates because i need original x ccordinates corresponding to each dust spot. 
+
+final_df_006_rows_col <- bind_rows(dust_df_rows_col) %>%
+  arrange(lag, label) %>%
+  mutate(dust_label = paste0("dust_", lag, "_", label)) %>% 
+  mutate(original_center_y = center_y + lag) %>% 
+  mutate(original_center_x = center_x + lag)
+
+
+## Also, I have add the real (true) intensities to the data frame final_df_006 as well. following shows the steps. 
+
+## reset the images
 
 img_list_use <- img_list
+
 r_006 <- rast(t(img_list_use$`scan-006.x3p`$surface.matrix))
 
-## 5x5 kernel to get the sum
-maxkernel_3x3 <- matrix(1, 3, 3)
-
-## apply the filter on the original raster. (no dimension reduction)
-r_blurred <- focal(r_006, w = maxkernel_3x3, fun = max, na.policy = "omit")
-
-plot(r_blurred)
-
-## High-pass: enhances sharp bumps (dust) by taking the difference
-r_highpass <-  r_blurred - r_006
-plot(r_highpass)
-
-## Get intensity values
-vals_hp <- values(r_highpass)
+## create a dataframe that has all the coordinates and intensity values corresponds to each x,y coordinate of the original scan-006
+all_coord_val_r_006_unfiltered <- terra::as.data.frame(r_006, xy = T)
 
 
-## Step 1: Identify positive outliers from the filtered image
-bx <- boxplot(vals_hp, plot = F)
-outliers <- bx$out[bx$out > 0]
+final_df_006__rows_col_updated <- final_df_006_rows_col %>%
+  left_join(all_coord_val_r_006_unfiltered, 
+            by = c("original_center_x" = "x", "original_center_y" = "y"))
 
-## obtain the cell numbers of the positive outliers
-cell_numbers <- which(vals_hp %in% outliers)
+##################### plotting the dust and radiuses ##############################
 
-coord_xyz_006 <- xyFromCell(r_006, cell = cell_numbers) %>% 
-  cbind(cell_numbers) %>%
-  cbind(r_006[cell_numbers]) %>% 
-  as.data.frame()
+## reset the images
 
-## create a new raster with T/F values (cells with outliers will be given T and others will be given F)
-r_006_updated_outliers <- r_006
-r_006_updated_outliers[-cell_numbers] <- FALSE
-r_006_updated_outliers[cell_numbers] <- TRUE
-
-
-## plotting the new raster "r_006" that contains boolian values
-plot(r_006_updated_outliers)
-
-## define a new kernal to find neighbors in a 3x3 window
-kernel <- matrix(1, nrow=3, ncol=3)
-## ignore the center when calculating the neighbours
-kernel[2, 2] <- 0
-
-## Apply a filter to count neighbours that are outliers
-neighbor_count <- focal(r_006_updated_outliers, w = kernel, fun = sum, na.policy = "omit", na.rm = TRUE)
-plot(neighbor_count)
-
-## create a new Binary raster: TRUE if pixel has >= 8 outlier neighbors
-spot_mask <- (neighbor_count >= 8)
-plot(spot_mask)
-
-## Plot the neighborhood count
-plot(neighbor_count, main = "Outlier Neighbor Count")
-points(coord_xyz$x, coord_xyz$y, col = "red")
-
-
-## iteration 02
-
-refined_outliers <- r_006_updated_outliers | spot_mask
-plot(refined_outliers)
-
-
-
-```
-
-```{r}
-library(terra)
-library(dplyr)
-
-## Function to detect dust spots on a single x3p raster
-detect_dust_spots <- function(surface_matrix, neighbor_cutoff = 8) {
-  
-  ## Step 1: Convert matrix to SpatRaster (transpose for correct orientation)
-  r_orig <- rast(t(surface_matrix))
-  
-  ## Step 2: Apply 3x3 max filter to blur the image
-  maxkernel_3x3 <- matrix(1, 3, 3)
-  r_blurred <- focal(r_orig, w = maxkernel_3x3, fun = max, na.policy = "omit")
-  
-  ## Step 3: High-pass filter to highlight bumps (just take the difference)
-  r_highpass <- r_blurred - r_orig
-  
-  ## Step 4: Extract values and identify positive outliers via boxplot method
-  vals_hp <- values(r_highpass)
-  bx <- boxplot(vals_hp, plot = FALSE)
-  outliers <- bx$out[bx$out > 0]
-  
-  ## Step 5: Get cell numbers of outliers
-  cell_numbers <- which(vals_hp %in% outliers)
-  
-  ## Step 6: Create binary raster: TRUE = outlier, FALSE = not outlier
-  r_outliers <- r_orig
-  r_outliers[-cell_numbers] <- FALSE
-  r_outliers[cell_numbers] <- TRUE
-  
-  ## Step 7: Count number of outlier neighbors for each pixel
-  neighbor_kernel <- matrix(1, 3, 3)
-  neighbor_kernel[2, 2] <- 0  ## exclude center
-  neighbor_count <- focal(r_outliers, w = neighbor_kernel, fun = sum, na.rm = TRUE)
-  
-  ## Step 8: Spot mask: mark TRUE if pixel has >= `neighbor_cutoff` outlier neighbors
-  spot_mask <- neighbor_count >= neighbor_cutoff
-  
-  ## Step 9: Combine original outliers with dense-neighbor outliers
-  refined_outliers <- r_outliers | spot_mask
-  
-  # Return everything as a list (optional)
-  return(list(
-    original = r_orig,
-    highpass = r_highpass,
-    outlier_mask = r_outliers,
-    neighbor_count = neighbor_count,
-    spot_mask = spot_mask,
-    refined_outliers = refined_outliers
-  ))
-}
-
-
-
-# Load your x3p image and extract the matrix
 img_list_use <- img_list
-surface_matrix <- img_list_use$`scan-006.x3p`$surface.matrix
 
-# Run detection
-results <- detect_dust_spots(surface_matrix, neighbor_cutoff = 8)
+r_006 <- rast(t(img_list_use$`scan-006.x3p`$surface.matrix))
 
-# Plot results
-plot(results$original, main = "Original Surface")
-plot(results$highpass, main = "High-Pass Filtered")
-plot(results$outlier_mask, main = "Initial Outliers")
-plot(results$neighbor_count, main = "Outlier Neighbor Count")
-plot(results$spot_mask, main = "Dense Neighbor Mask")
-plot(results$refined_outliers, main = "Final Refined Outliers")
+plot(r_006, main = "Dust Spots Detected")
+points(final_df_006__rows_col_updated$original_center_x, final_df_006__rows_col_updated$original_center_y, col = "blue", pch = 20, cex = 1.2)
+symbols(final_df_006__rows_col_updated$original_center_x, final_df_006__rows_col_updated$original_center_y, circles = final_df_006__rows_col_updated$radius, inches = FALSE, add = TRUE, fg = "red")
+
+
+############################### plot for lag 5 ####################################
+
+## Plot image with centers and dust spots at lag 5 
+final_df_006__rows_col_updated_lag5 <- final_df_006__rows_col_updated %>% 
+  filter(lag == 5 ) 
+
+plot(r_006, main = "Dust Spots Detected, lag 5")
+
+points(final_df_006__rows_col_updated_lag5$original_center_x, final_df_006__rows_col_updated_lag5$original_center_y, col = "blue", pch = 20, cex = 1.2)
+
+symbols(final_df_006__rows_col_updated_lag5$original_center_x, final_df_006__rows_col_updated_lag5$original_center_y, circles = final_df_006__rows_col_updated_lag5$radius, inches = FALSE, add = TRUE, fg = "red")
+
+
+############################## plot for lag 10 ####################################
+
+## Plot image with centers and dust spots at lag 10 
+final_df_006__rows_col_updated_lag10 <- final_df_006__rows_col_updated %>% 
+  filter(lag == 10 ) 
+
+plot(r_006, main = "Dust Spots Detected, lag 10")
+points(final_df_006__rows_col_updated_lag10$original_center_x, final_df_006__rows_col_updated_lag10$original_center_y, col = "blue", pch = 20, cex = 1.2)
+symbols(final_df_006__rows_col_updated_lag10$original_center_x, final_df_006__rows_col_updated_lag10$original_center_y, circles = final_df_006__rows_col_updated_lag10$radius, inches = FALSE, add = TRUE, fg = "red")
+
+
+############################## plot for lag 15 ####################################
+
+## Plot image with centers and dust spots at lag 15 
+final_df_006__rows_col_updated_lag15 <- final_df_006__rows_col_updated %>% 
+  filter(lag == 15 ) 
+
+plot(r_006, main = "Dust Spots Detected, lag 15")
+
+points(final_df_006__rows_col_updated_lag15$original_center_x, final_df_006__rows_col_updated_lag15$original_center_y, col = "blue", pch = 20, cex = 1.2)
+
+symbols(final_df_006__rows_col_updated_lag15$original_center_x, final_df_006__rows_col_updated_lag15$original_center_y, circles = final_df_006__rows_col_updated_lag15$radius, inches = FALSE, add = TRUE, fg = "red")
+
+
+############################## plot for lag 20 ####################################
+
+## Plot image with centers and dust spots at lag 20 
+final_df_006__rows_col_updated_lag20 <- final_df_006__rows_col_updated%>% 
+  filter(lag == 20 ) 
+
+plot(r_006, main = "Dust Spots Detected, at lag 20")
+
+points(final_df_006__rows_col_updated_lag20$original_center_x, final_df_006__rows_col_updated_lag20$original_center_y, col = "blue", pch = 20, cex = 1.2)
+
+symbols(final_df_006__rows_col_updated_lag20$original_center_x, final_df_006__rows_col_updated_lag20$original_center_y, circles = final_df_006__rows_col_updated_lag20$radius, inches = FALSE, add = TRUE, fg = "red")
+
+
+############################## plot for lag 25 ####################################
+
+## Plot image with centers and dust spots at lag 25 
+final_df_006__rows_col_updated_lag25 <- final_df_006__rows_col_updated %>% 
+  filter(lag == 25 ) 
+
+plot(r_006, main = "Dust Spots Detected, lag 25")
+
+points(final_df_006__rows_col_updated_lag25$original_center_x, final_df_006__rows_col_updated_lag25$original_center_y, col = "blue", pch = 20, cex = 1.2)
+
+symbols(final_df_006__rows_col_updated_lag25$original_center_x, final_df_006__rows_col_updated_lag25$original_center_y, circles = final_df_006__rows_col_updated_lag25$radius, inches = FALSE, add = TRUE, fg = "red")
 
 ```
 
-```{r}
-library(terra)
-library(dplyr)
+This is also not good. i need to filter out based on a good threshold on radius to obtain the possible dust spots.
 
-detect_dust_spots_iterative <- function(surface_matrix, neighbor_cutoff = 8, max_iter = 5, verbose = TRUE) {
+## Generalizing the idea (using column-wise filtering)to all the images - only using first 5 images
+
+```{r, warning=FALSE, message=FALSE}
+
+
+## Vector of lag values
+lags <- c(5, 10, 15, 20, 25)
+
+## Initialize list to store results
+dust_df_all <- list()
+
+# Loop through each image (only uses 5 here) in img_list_use
+for (img_name in names(img_list_use)[1:5]) {
   
-  # Convert to SpatRaster
-  r_orig <- rast(t(surface_matrix))
-  
-  # High-pass filtering
-  maxkernel_3x3 <- matrix(1, 3, 3)
-  r_blurred <- focal(r_orig, w = maxkernel_3x3, fun = max, na.policy = "omit")
-  r_highpass <- r_blurred - r_orig
-  
-  # Initial outlier detection using boxplot (positive outliers)
-  vals_hp <- values(r_highpass)
-  bx <- boxplot(vals_hp, plot = FALSE)
-  outliers <- bx$out[bx$out > 0]
-  cell_numbers <- which(vals_hp %in% outliers)
-  
-  # Initial binary outlier raster
-  r_outliers <- r_orig
-  r_outliers[] <- FALSE
-  r_outliers[cell_numbers] <- TRUE
-  
-  # Define 3x3 kernel (excluding center)
-  kernel <- matrix(1, 3, 3)
-  kernel[2, 2] <- 0
-  
-  # Iterative refinement
-  refined_outliers <- r_outliers
-  for (i in 1:max_iter) {
-    if (verbose) cat("Iteration", i, "\n")
+  # Loop through each lag value
+  for (i in lags) {
     
-    # Count neighbors
-    neighbor_count <- focal(refined_outliers, w = kernel, fun = sum, na.rm = TRUE)
+    ## Copy the image to avoid modifying the original
+    img_use <- img_list_use[[img_name]]
     
-    # Create a mask where pixels have >= neighbor_cutoff outlier neighbors
-    spot_mask <- neighbor_count >= neighbor_cutoff
+    ## Apply diff filter (column-wise, that is on x direction)
+    img_use$surface.matrix <- t(diff(t(img_use$surface.matrix), lag = i))
     
-    # Combine with previous outliers
-    updated_outliers <- refined_outliers | spot_mask
+    ## Create raster object from filtered matrix
+    r_filtered <- rast(t(img_use$surface.matrix))
     
-    # Check for convergence
-    if (all(values(updated_outliers) == values(refined_outliers))) {
-      if (verbose) cat("No new pixels added. Converged at iteration", i, "\n")
-      break
-    }
+    ## Find positive outliers and cell indexes
+    bx <- boxplot(values(r_filtered), plot = FALSE)
+    bumps <- bx$out[bx$out > 0]
+    idx <- which(values(r_filtered) %in% bumps)
     
-    # Update for next iteration
-    refined_outliers <- updated_outliers
+    ## Skip if there are no outliers
+    if (length(idx) == 0) next
+    
+    ## obtain the coordinates of the outliers and their filtered intensities
+    coords_xy <- xyFromCell(r_filtered, idx)
+    z_vals <- values(r_filtered)[idx]
+    ## create a matrix array with all x, y and filtered intensities (z)
+    coords_3d <- cbind(coords_xy, z_filtered = z_vals)
+    
+    ## Apply DBSCAN clustering using the optimal parameters
+    eps_val <- 5  
+    minPts <- 2
+    cluster <- dbscan::dbscan(coords_3d, eps = eps_val, minPts = minPts)
+    
+    df_clustered <- as.data.frame(coords_3d) %>%
+      mutate(label = cluster$cluster) %>%
+      filter(label != 0) ## remove noise points
+    
+    if (nrow(df_clustered) == 0) next
+    
+    ## obtaining the relevant information from each image for each lag
+    cluster_summary <- df_clustered %>%
+      group_by(label) %>%
+      summarise(
+        center_x = x[which.max(z_filtered)],
+        center_y = y[which.max(z_filtered)],
+        center_z = max(z_filtered),
+        radius = max(sqrt((x - x[which.max(z_filtered)])^2 + 
+                            (y - y[which.max(z_filtered)])^2)),
+        .groups = "drop"
+      ) %>%
+      mutate(
+        lag = i,
+        image = img_name  ## Add image identifier
+      )
+    
+    ## Store results
+    dust_df_all[[paste(img_name, i, sep = "_")]] <- cluster_summary
   }
-  
-  # Return results
-  return(list(
-    original = r_orig,
-    highpass = r_highpass,
-    final_outliers = refined_outliers
-  ))
 }
 
+## Combine all results into one data frame
+final_df <- bind_rows(dust_df_all)
 
-# Load your surface matrix
-surface_matrix <- img_list$`scan-006.x3p`$surface.matrix
 
-# Run iterative dust spot detection
-results_iter <- detect_dust_spots_iterative(surface_matrix, neighbor_cutoff = 8, max_iter = 10)
+```
 
-# Plot final refined outliers
-plot(results_iter$original, main = "Original")
-plot(results_iter$highpass, main = "High-Pass Filtered")
-plot(results_iter$final_outliers, main = "Refined Outliers (Iterative)")
+## Combining the two data frames to get the original intensity values corresponding to each center coordinate for each image.
+
+### Here, the plotting is only done for scan-006
+
+```{r, warning=FALSE, message=FALSE}
+
+
+## I have to update the x coordinates because i need original x ccordinates corresponding to each dust spot. 
+
+final_df_updated <-  final_df %>% 
+  group_by(lag, label, image) %>%
+  mutate(dust_label = paste0(image, "_dust_", lag, "_", label)) %>% 
+  mutate(original_center_x = center_x + lag)
+
+
+## Also, I have add the real (true) intensities to the data frame final_df_006 as well. following shows the steps. 
+
+##  Extract intensity + coordinates per image
+img_list_use <- img_list
+all_img_coord_val_unfiltered <- list()
+
+for (img_name in names(img_list_use)[1:5]) {
+  img <- img_list_use[[img_name]]
+  r <- rast(t(img$surface.matrix))
+  df <- terra::as.data.frame(r, xy = TRUE) %>%
+    mutate(image = img_name)
+  all_img_coord_val_unfiltered[[img_name]] <- df
+}
+
+## Combine all image pixel data into one data frame
+coord_val_df <- purrr::list_rbind(all_img_coord_val_unfiltered)
+
+## Join original x,y coords with true intensity values
+final_df_all_img_updated <- final_df_updated %>%
+  left_join(coord_val_df, 
+            by = c("image", "original_center_x" = "x", "center_y" = "y"))
+
+## only with the relevant info
+final_df_all_img_updated %>% 
+  dplyr::select(original_center_x, center_y, lyr.1, label, radius,
+         lag,image,dust_label) %>% 
+  rename("center_z" = lyr.1, "center_x" = original_center_x )
+
+
+############## plotting the dust and radiuses on scan 006 ########################
+
+## reset the images
+
+img_list_use <- img_list
+
+r_006 <- rast(t(img_list_use$`scan-006.x3p`$surface.matrix))
+
+final_df_all_img_updated_006 <- final_df_all_img_updated %>% 
+  filter(image == "scan-006.x3p")
+
+plot(r_006, main = "Dust Spots Detected")
+
+points(final_df_all_img_updated_006$original_center_x, final_df_all_img_updated_006$center_y, col = "blue", pch = 20, cex = 1.2)
+
+symbols(final_df_all_img_updated_006$original_center_x, final_df_all_img_updated_006$center_y, circles = final_df_all_img_updated_006$radius, inches = FALSE, add = TRUE, fg = "red")
+
+
+############################### plot for lag 5 ####################################
+
+## Plot image with centers and dust spots at lag 5 
+final_df_all_img_updated_006_lag5 <- final_df_all_img_updated_006 %>% 
+  filter(lag == 5 ) 
+
+plot(r_006, main = "Dust Spots Detected, lag 5")
+
+points(final_df_all_img_updated_006_lag5$original_center_x, final_df_all_img_updated_006_lag5$center_y, col = "blue", pch = 20, cex = 1.2)
+
+symbols(final_df_all_img_updated_006_lag5$original_center_x, final_df_all_img_updated_006_lag5$center_y, circles = final_df_all_img_updated_006_lag5$radius, inches = FALSE, add = TRUE, fg = "red")
+
+
+############################## plot for lag 10 ####################################
+
+## Plot image with centers and dust spots at lag 10 
+final_df_all_img_updated_006_lag5 <- final_df_all_img_updated_006 %>% 
+  filter(lag == 10 ) 
+
+plot(r_006, main = "Dust Spots Detected, lag 10")
+
+points(final_df_all_img_updated_006_lag5$original_center_x, final_df_all_img_updated_006_lag5$center_y, col = "blue", pch = 20, cex = 1.2)
+
+symbols(final_df_all_img_updated_006_lag5$original_center_x, final_df_all_img_updated_006_lag5$center_y, circles = final_df_all_img_updated_006_lag5$radius, inches = FALSE, add = TRUE, fg = "red")
+
+
+############################## plot for lag 15 ####################################
+
+## Plot image with centers and dust spots at lag 15 
+final_df_all_img_updated_006_lag15 <- final_df_all_img_updated_006 %>% 
+  filter(lag == 15 ) 
+
+plot(r_006, main = "Dust Spots Detected, lag 15")
+
+points(final_df_all_img_updated_006_lag15$original_center_x, final_df_all_img_updated_006_lag15$center_y, col = "blue", pch = 20, cex = 1.2)
+
+symbols(final_df_all_img_updated_006_lag15$original_center_x, final_df_all_img_updated_006_lag15$center_y, circles = final_df_all_img_updated_006_lag15$radius, inches = FALSE, add = TRUE, fg = "red")
+
+
+############################## plot for lag 20 ####################################
+
+## Plot image with centers and dust spots at lag 20 
+final_df_all_img_updated_006_lag20 <- final_df_all_img_updated_006 %>% 
+  filter(lag == 20 ) 
+
+plot(r_006, main = "Dust Spots Detected, at lag 20")
+
+points(final_df_all_img_updated_006_lag20$original_center_x, final_df_all_img_updated_006_lag20$center_y, col = "blue", pch = 20, cex = 1.2)
+
+symbols(final_df_all_img_updated_006_lag20$original_center_x, final_df_all_img_updated_006_lag20$center_y, circles = final_df_all_img_updated_006_lag20$radius, inches = FALSE, add = TRUE, fg = "red")
+
+
+############################## plot for lag 25 ####################################
+
+## Plot image with centers and dust spots at lag 25 
+final_df_all_img_updated_006_lag25 <- final_df_all_img_updated_006 %>% 
+  filter(lag == 25 ) 
+
+plot(r_006, main = "Dust Spots Detected, lag 25")
+
+points(final_df_all_img_updated_006_lag25$original_center_x, final_df_all_img_updated_006_lag25$center_y, col = "blue", pch = 20, cex = 1.2)
+
+symbols(final_df_all_img_updated_006_lag25$original_center_x, final_df_all_img_updated_006_lag25$center_y, circles = final_df_all_img_updated_006_lag25$radius, inches = FALSE, add = TRUE, fg = "red")
+
+```
+
+## Scan 010
+
+```{r, warning=FALSE, message=FALSE}
+############## plotting the dust and radiuses on scan 513 ########################
+
+## reset the images
+
+img_list_use <- img_list
+
+r_010 <- rast(t(img_list_use$`scan-010.x3p`$surface.matrix))
+
+final_df_all_img_updated_010 <- final_df_all_img_updated %>% 
+  filter(image == "scan-010.x3p")
+
+plot(r_010, main = "Dust Spots Detected")
+
+points(final_df_all_img_updated_010$original_center_x, final_df_all_img_updated_010$center_y, col = "blue", pch = 20, cex = 1.2)
+
+symbols(final_df_all_img_updated_010$original_center_x, final_df_all_img_updated_010$center_y, circles = final_df_all_img_updated_010$radius, inches = FALSE, add = TRUE, fg = "red")
+
+
+############################### plot for lag 5 ####################################
+
+## Plot image with centers and dust spots at lag 5 
+final_df_all_img_updated_010_lag5 <- final_df_all_img_updated_010 %>% 
+  filter(lag == 5 ) 
+
+plot(r_010, main = "Dust Spots Detected, lag 5")
+
+points(final_df_all_img_updated_010_lag5$original_center_x, final_df_all_img_updated_010_lag5$center_y, col = "blue", pch = 20, cex = 1.2)
+
+symbols(final_df_all_img_updated_010_lag5$original_center_x, final_df_all_img_updated_010_lag5$center_y, circles = final_df_all_img_updated_010_lag5$radius, inches = FALSE, add = TRUE, fg = "red")
+
+
+############################## plot for lag 10 ####################################
+
+## Plot image with centers and dust spots at lag 10 
+final_df_all_img_updated_010_lag10 <- final_df_all_img_updated_010 %>% 
+  filter(lag == 10 ) 
+
+plot(r_010, main = "Dust Spots Detected, lag 10")
+
+points(final_df_all_img_updated_010_lag10$original_center_x, final_df_all_img_updated_010_lag10$center_y, col = "blue", pch = 20, cex = 1.2)
+
+symbols(final_df_all_img_updated_010_lag10$original_center_x, final_df_all_img_updated_010_lag10$center_y, circles = final_df_all_img_updated_010_lag10$radius, inches = FALSE, add = TRUE, fg = "red")
+
+
+############################## plot for lag 15 ####################################
+
+## Plot image with centers and dust spots at lag 15 
+final_df_all_img_updated_010_lag15 <- final_df_all_img_updated_010 %>% 
+  filter(lag == 15 ) 
+
+plot(r_010, main = "Dust Spots Detected, lag 15")
+
+points(final_df_all_img_updated_010_lag15$original_center_x, final_df_all_img_updated_010_lag15$center_y, col = "blue", pch = 20, cex = 1.2)
+
+symbols(final_df_all_img_updated_010_lag15$original_center_x, final_df_all_img_updated_010_lag15$center_y, circles = final_df_all_img_updated_010_lag15$radius, inches = FALSE, add = TRUE, fg = "red")
+
+
+############################## plot for lag 20 ####################################
+
+## Plot image with centers and dust spots at lag 20 
+final_df_all_img_updated_010_lag20 <- final_df_all_img_updated_010 %>% 
+  filter(lag == 20 ) 
+
+plot(r_010, main = "Dust Spots Detected, at lag 20")
+
+points(final_df_all_img_updated_010_lag20$original_center_x, final_df_all_img_updated_010_lag20$center_y, col = "blue", pch = 20, cex = 1.2)
+
+symbols(final_df_all_img_updated_010_lag20$original_center_x, final_df_all_img_updated_010_lag20$center_y, circles = final_df_all_img_updated_010_lag20$radius, inches = FALSE, add = TRUE, fg = "red")
+
+
+############################## plot for lag 25 ####################################
+
+## Plot image with centers and dust spots at lag 25 
+final_df_all_img_updated_010_lag25 <- final_df_all_img_updated_010 %>% 
+  filter(lag == 25 ) 
+
+plot(r_010, main = "Dust Spots Detected, lag 25")
+
+points(final_df_all_img_updated_010_lag25$original_center_x, final_df_all_img_updated_010_lag25$center_y, col = "blue", pch = 20, cex = 1.2)
+
+symbols(final_df_all_img_updated_010_lag25$original_center_x, final_df_all_img_updated_010_lag25$center_y, circles = final_df_all_img_updated_010_lag25$radius, inches = FALSE, add = TRUE, fg = "red")
+
 
 ```
