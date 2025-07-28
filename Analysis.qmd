@@ -1681,7 +1681,7 @@ points(final_dust_cluster_df$x_original, final_dust_cluster_df$y,
 
 ## Try obtaining the whole data-frame for all the scans - computationally, very expensive
 
-```{r, warning=FALSE, message=FALSE}
+```{r, warning=FALSE, message=FALSE, eval=FALSE, include=FALSE}
 
 ## Vector of lag values
 lags <- c(5, 10, 15, 20, 25)
