@@ -791,9 +791,6 @@ for (i in lags) {
   ## Apply diff filter at the current lag (column-wise of the original scan)
   img_list_use$`scan-006.x3p`$surface.matrix <- t(diff(t(img_list_use$`scan-006.x3p`$surface.matrix), lag = i))
   
-  ## apply the filter on row-wise again. 
-  ## img_list_use$`scan-006.x3p`$surface.matrix <- diff(img_list_use$`scan-006.x3p`$surface.matrix, lag=i)
-  
   ##create a raster object from the filtered scan. 
   r_filtered <- rast(t(img_list_use$`scan-006.x3p`$surface.matrix))
   
@@ -1385,6 +1382,7 @@ lags <- c(5, 10, 15, 20, 25)
 
 ## Initialize list to store results
 dust_df_all <- list()
+dust_cluster_list <- list()
 
 # Loop through each image (only uses 5 here) in img_list_use
 for (img_name in names(img_list_use)[1:5]) {
@@ -1421,14 +1419,16 @@ for (img_name in names(img_list_use)[1:5]) {
     cluster <- dbscan::dbscan(coords_3d, eps = eps_val, minPts = minPts)
     
     df_clustered <- as.data.frame(coords_3d) %>%
-      mutate(label = cluster$cluster) %>%
-      filter(label != 0) ## remove noise points
+      mutate(label = cluster$cluster) %>% 
+      mutate(lag = i,
+             image_name = img_name,
+             x_original = x + i)
     
     if (nrow(df_clustered) == 0) next
     
     ## obtaining the relevant information from each image for each lag
     cluster_summary <- df_clustered %>%
-      group_by(label) %>%
+      group_by(label, lag, image_name) %>%
       summarise(
         center_x = x[which.max(z_filtered)],
         center_y = y[which.max(z_filtered)],
@@ -1437,19 +1437,17 @@ for (img_name in names(img_list_use)[1:5]) {
                             (y - y[which.max(z_filtered)])^2)),
         .groups = "drop"
       ) %>%
-      mutate(
-        lag = i,
-        image = img_name  ## Add image identifier
-      )
+      filter(label != 0)
     
     ## Store results
     dust_df_all[[paste(img_name, i, sep = "_")]] <- cluster_summary
+    dust_cluster_list[[paste(img_name, i, sep = "_")]] <- df_clustered
   }
 }
 
 ## Combine all results into one data frame
 final_df <- bind_rows(dust_df_all)
-
+final_dust_cluster_df <- bind_rows(dust_cluster_list)
 
 ```
 
@@ -1462,9 +1460,9 @@ final_df <- bind_rows(dust_df_all)
 
 ## I have to update the x coordinates because i need original x ccordinates corresponding to each dust spot. 
 
-final_df_updated <-  final_df %>% 
-  group_by(lag, label, image) %>%
-  mutate(dust_label = paste0(image, "_dust_", lag, "_", label)) %>% 
+final_df_updated_5_images <-  final_df %>% 
+  group_by(lag, label, image_name) %>%
+  mutate(dust_label = paste0(image_name, "_dust_", lag, "_", label)) %>% 
   mutate(original_center_x = center_x + lag)
 
 
@@ -1486,14 +1484,14 @@ for (img_name in names(img_list_use)[1:5]) {
 coord_val_df <- purrr::list_rbind(all_img_coord_val_unfiltered)
 
 ## Join original x,y coords with true intensity values
-final_df_all_img_updated <- final_df_updated %>%
+final_df_5_imgages_updated <- final_df_updated_5_images %>%
   left_join(coord_val_df, 
-            by = c("image", "original_center_x" = "x", "center_y" = "y"))
+            by = c("image_name"="image", "original_center_x" = "x", "center_y" = "y"))
 
 ## only with the relevant info
-final_df_all_img_updated %>% 
+final_df_5_imgages_updated %>% 
   dplyr::select(original_center_x, center_y, lyr.1, label, radius,
-         lag,image,dust_label) %>% 
+         lag,image_name,dust_label) %>% 
   rename("center_z" = lyr.1, "center_x" = original_center_x )
 
 
@@ -1505,8 +1503,8 @@ img_list_use <- img_list
 
 r_006 <- rast(t(img_list_use$`scan-006.x3p`$surface.matrix))
 
-final_df_all_img_updated_006 <- final_df_all_img_updated %>% 
-  filter(image == "scan-006.x3p")
+final_df_all_img_updated_006 <- final_df_5_imgages_updated %>% 
+  filter(image_name == "scan-006.x3p")
 
 plot(r_006, main = "Dust Spots Detected")
 
@@ -1592,8 +1590,8 @@ img_list_use <- img_list
 
 r_010 <- rast(t(img_list_use$`scan-010.x3p`$surface.matrix))
 
-final_df_all_img_updated_010 <- final_df_all_img_updated %>% 
-  filter(image == "scan-010.x3p")
+final_df_all_img_updated_010 <- final_df_5_imgages_updated %>% 
+  filter(image_name == "scan-010.x3p")
 
 plot(r_010, main = "Dust Spots Detected")
 
@@ -1666,5 +1664,124 @@ points(final_df_all_img_updated_010_lag25$original_center_x, final_df_all_img_up
 
 symbols(final_df_all_img_updated_010_lag25$original_center_x, final_df_all_img_updated_010_lag25$center_y, circles = final_df_all_img_updated_010_lag25$radius, inches = FALSE, add = TRUE, fg = "red")
 
+
+```
+
+## Analyzing the noise points in scan-010
+
+```{r}
+
+final_dust_cluster_df%>% 
+  filter(label==0 & lag ==5 & image_name == "scan-006.x3p")
+
+plot(r_006)
+points(final_dust_cluster_df$x_original, final_dust_cluster_df$y, 
+       col ="red", pch=20, cex = 1.2)
+```
+
+## Try obtaining the whole data-frame for all the scans - computationally, very expensive
+
+```{r, warning=FALSE, message=FALSE}
+
+## Vector of lag values
+lags <- c(5, 10, 15, 20, 25)
+
+## Initialize list to store results
+dust_df_all <- list()
+dust_cluster_list <- list()
+size <- length(names(img_list_use))
+
+# Loop through each image (only uses 5 here) in img_list_use
+for (img_name in names(img_list_use)[1:size]) {
+  
+  # Loop through each lag value
+  for (i in lags) {
+    
+    ## Copy the image to avoid modifying the original
+    img_use <- img_list_use[[img_name]]
+    
+    ## Apply diff filter (column-wise, that is on x direction)
+    img_use$surface.matrix <- t(diff(t(img_use$surface.matrix), lag = i))
+    
+    ## Create raster object from filtered matrix
+    r_filtered <- rast(t(img_use$surface.matrix))
+    
+    ## Find positive outliers and cell indexes
+    bx <- boxplot(values(r_filtered), plot = FALSE)
+    bumps <- bx$out[bx$out > 0]
+    idx <- which(values(r_filtered) %in% bumps)
+    
+    ## Skip if there are no outliers
+    if (length(idx) == 0) next
+    
+    ## obtain the coordinates of the outliers and their filtered intensities
+    coords_xy <- xyFromCell(r_filtered, idx)
+    z_vals <- values(r_filtered)[idx]
+    ## create a matrix array with all x, y and filtered intensities (z)
+    coords_3d <- cbind(coords_xy, z_filtered = z_vals)
+    
+    ## Apply DBSCAN clustering using the optimal parameters
+    eps_val <- 5  
+    minPts <- 2
+    cluster <- dbscan::dbscan(coords_3d, eps = eps_val, minPts = minPts)
+    
+    df_clustered <- as.data.frame(coords_3d) %>%
+      mutate(label = cluster$cluster) %>% 
+      mutate(lag = i , scan_name = img_name)
+    
+    if (nrow(df_clustered) == 0) next
+    
+    ## obtaining the relevant information from each image for each lag
+    cluster_summary <- df_clustered %>%
+      group_by(label, scan_name, lag) %>%
+      summarise(
+        center_x = x[which.max(z_filtered)],
+        center_y = y[which.max(z_filtered)],
+        center_z = max(z_filtered),
+        radius = max(sqrt((x - x[which.max(z_filtered)])^2 + 
+                            (y - y[which.max(z_filtered)])^2)),
+        .groups = "drop"
+      ) %>%
+      mutate(original_center_x = center_x + i) %>%
+      filter(label != 0)
+    
+    ## reset the image
+    img_use <- img_list_use[[img_name]]
+    r_original <- rast(t(img_use$surface.matrix))
+    df <- terra::as.data.frame(r_original, xy = T) %>% 
+      mutate(scan_name = img_name)
+    
+    cluster_summary <- cluster_summary %>% 
+      inner_join(df, by = c("scan_name", "original_center_x" = "x", 
+      "center_y" = "y"))
+    
+    ## Store results
+    dust_df_all[[paste(img_name, i, sep = "_")]] <- cluster_summary
+    dust_cluster_list[[paste(img_name, i, sep = "_")]] <- df_clustered
+  }
+}
+
+## Combine all results into one data frame
+final_df_all_img <- bind_rows(dust_df_all)
+final_cluster_details <- bind_rows(dust_cluster_list)
+
+
+```
+
+## Summarizes the data-frame
+
+```{r}
+## Just want to relabel the dust spots according to the image and lag 
+
+final_df_all_img_updated <-  final_df_all_img %>% 
+  group_by(lag, label, scan_name) %>%
+  mutate(dust_label = paste0(scan_name, "_dust_", lag, "_", label))
+
+
+## only with the relevant info
+final_df_all_img_updated_info <- final_df_all_img_updated %>% 
+  dplyr::select(original_center_x, center_y, lyr.1, label, radius,
+         lag,scan_name,dust_label) %>% 
+  rename("center_z" = lyr.1, "center_x" = original_center_x )
 
 ```

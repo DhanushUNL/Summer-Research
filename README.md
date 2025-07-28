@@ -130,3 +130,13 @@ Mainly, For each scan, I need to summarize the dust information into a data-fram
 6.  actual intensity value of the center of the dust spot.
 
 Task : add all the images to the fo loop you created and proceed.
+
+## July 23- july 30
+
+Formalized the process, which involved running the algorithm on all the images. (I was able to run the algorithm for several images, but not for all of them at once. )
+
+Difficulties faced :
+
+-   computationally unfeasible. (lac of memory)
+
+-   couldn't completely train parameters in DBSCAN due to lac of memory issue.

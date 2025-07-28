@@ -216,6 +216,50 @@ works. <strong><em>Question is, how can i evaluate the
 method?</em></strong></p>
 <p><code>Maybe</code> i will Look forward to fit a 3D plane to the
 surface and analyze the residuals as an alternative approach.</p>
+<div id="how-we-evaluate" class="section level3">
+<h3>How we evaluate?</h3>
+<p>The question is, should we need to look at higher lagged differences?
+That means, according to the previous example, it seemed that detected
+dust spots at lag 20 and 25 are almost appeared to be the same. Hence,
+its reasonable to consider only lag 20, rather than taking the lagged
+differences at lag 25 or higher.</p>
+<p>Assumption : at higher lags, the diff operator only captures the
+larger dust spots.</p>
+<p>Idea :</p>
+<ul>
+<li><p>obtain the coordinates of the possible dust particles from the
+filtered images using the method 1 (discussed earlier) at a certain lag.
+store them in separate data frames.</p></li>
+<li><p>Then combine all those coordinates (data frames) of each filtered
+image (lags, 5, 10,15,20, 25) ——&gt; use inner_join()</p>
+<ul>
+<li><p>Calculate the dimension ratio for each data frame such that,</p>
+<p><span class="math display">\[\text{proportion of coordinates} =
+\frac{\#\text{ of coordinates in combined data frame}}{\#\text{ of
+coordinates in lag } i \text{ data frame}}\]</span></p></li>
+<li><p>Can draw a graph and pick the lag by using the elbow
+method.</p></li>
+</ul></li>
+</ul>
+</div>
+</div>
+<div id="july-16---july-23" class="section level2">
+<h2>July 16 - July 23</h2>
+<p>Previous evaluation method will not be useful. So, we suggest Density
+Based Clustering method (DBSCAN) to detect the locations, radius and
+other information.</p>
+<p>Mainly, For each scan, I need to summarize the dust information into
+a data-frame that contains,</p>
+<ol style="list-style-type: decimal">
+<li>Locations (x, y coordinates of the center of the dust spot)</li>
+<li>Radius (size of the dust spot, assuming the dust spots are
+circular)</li>
+<li>Dust labels.</li>
+<li>Lag ( lag that detected the dust spot)</li>
+<li>actual x coordinate value.</li>
+<li>actual intensity value of the center of the dust spot.</li>
+</ol>
+<p>Task : add all the images to the fo loop you created and proceed.</p>
 </div>
 </div>
 </section>
