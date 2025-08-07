@@ -407,3 +407,13 @@ updated_df %>%
   filter(scan_order %in% c(-1:-25)) %>% 
   ggplot(aes(x = new_center_x, y = new_center_y, color = cluster)) + geom_point()
 ```
+
+## Save the data-frame
+
+```{r}
+
+write.csv(updated_df, file = "dust_mapping.csv", row.names = F)
+
+
+
+```
