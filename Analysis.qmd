@@ -13,7 +13,6 @@ library(pacman)
 p_load(tidyverse, ggplot2, terra, x3ptools, prettydoc, sf, raster,lsa, cluster,
        dbscan)
 
-
 ```
 
 ## Importing all the scans
@@ -226,8 +225,8 @@ img_list_use <- img_list
 
 img_list_use$`scan-006.x3p`$surface.matrix <- t(diff(t(img_list_use$`scan-006.x3p`$surface.matrix), lag=10))
 
-## img_list_use$`scan-006.x3p` %>% 
-##  x3p_image()
+img_list_use$`scan-006.x3p` %>% 
+  x3p_image()
 
 plot(rast(t(img_list_use$`scan-006.x3p`$surface.matrix)),main = "Scan 006,lag 10")
 
@@ -1789,6 +1788,7 @@ final_df_all_img_updated_info <- final_df_all_img_updated %>%
 ## Creating a function
 
 ```{r}
+
 image_data <-  function(lag, img_list_use,eps=5, min_points=2){
   
   ## loading packages
@@ -1901,7 +1901,11 @@ image_data <-  function(lag, img_list_use,eps=5, min_points=2){
 
 ```{r}
 
-df_demo <- image_data(lag = c(5,10), img_list_use = img_list_use[1:5], eps = 5, min_points = 2)
-df_demo[[2]]
 
+df_demo <- image_data(lag = c(5,10), img_list_use = img_list_use[1:5], eps = 5, min_points = 2)
+
+
+## save objects
+
+write.csv(final_cluster_details, "All_img_dust_clusters.csv", row.names = FALSE)
 ```

@@ -1,0 +1,409 @@
+---
+title: "Processing the data-frame"
+author: "Dhanushka"
+format: html
+editor: visual
+---
+
+## Loading the packages
+
+```{r, message=FALSE, warning=FALSE}
+library(pacman)
+
+p_load(dplyr, tidyverse, ggplot2, terra, cluster, dbscan, sf, x3ptools,
+       plotly, animation, purr)
+
+
+```
+
+## Loading the data-frame
+
+```{r, message=FALSE, warning=FALSE}
+
+gel_01_dust_data <- read.csv(file = "F://Learning materials//R studio//Summer-Research//Gel_01_dust.csv", header = T, sep = ",")
+
+```
+
+## filter out the dust spots detected at least in 3 lags `(minPts=3)` for a particular image - lets use, scan-006
+
+```{r, message=FALSE, warning=FALSE}
+
+scan_006_all_dust <- gel_01_dust_data %>% 
+  mutate(scan_order = parse_number(scan_name)) %>% 
+  filter(scan_order == -6)
+  
+merge_dust_006 <- dbscan(scan_006_all_dust[c("center_x", "center_y")], eps = 50, minPts = 3)  
+
+## plot of merged dust
+scan_006_all_dust %>%
+  mutate(cluster = merge_dust_006$cluster) %>% 
+  filter(cluster != 0) %>% 
+  select(center_x, center_y, center_z, lag, cluster) %>% 
+  ggplot(aes(x = center_x, y= center_y)) + geom_point(aes(col = factor(cluster)))
+
+merged_dust_info_006 <- scan_006_all_dust %>% 
+  mutate(cluster = merge_dust_006$cluster) %>% 
+  filter(cluster != 0) %>% 
+  group_by(cluster) %>% 
+  summarise(new_center_x = center_x[which.max(center_z)],
+            new_center_y = center_y[which.max(center_z)],
+            new_radius = max(sqrt((center_x - center_x[which.max(center_z)])^2 + (center_y - center_y[which.max(center_z)])^2)),
+          .groups = "drop"
+        ) 
+  
+plot(rast(t(img_list_use$`scan-006.x3p`$surface.matrix)))
+points(merged_dust_info_006[c("new_center_x","new_center_y")], col = "red", pch = 20)
+symbols(merged_dust_info_006[c("new_center_x","new_center_y")], circles = merged_dust_info_006$new_radius, inches = FALSE, add = TRUE, fg = "white")
+
+
+```
+
+## Generalize the idea for all images
+
+```{r, message=FALSE, warning=FALSE}
+
+updated_dust_all_scans <- list()
+size = length(names(img_list_use))
+
+for (img_name in names(img_list_use)[1:size]) {
+  
+  scan <- gel_01_dust_data %>% 
+  filter(scan_name == img_name)
+  
+  merge_dust <- dbscan(scan[c("center_x", "center_y")], eps = 50, minPts = 3)  
+  
+  merged_dust_info <- scan %>% 
+    mutate(new_dust_label = merge_dust$cluster) %>% 
+    filter(new_dust_label != 0) %>% 
+    group_by(new_dust_label, scan_name) %>% 
+    summarise(new_center_x = center_x[which.max(center_z)],
+              new_center_y = center_y[which.max(center_z)],
+              new_radius = max(sqrt((center_x - center_x[which.max(center_z)])^2 + (center_y - center_y[which.max(center_z)])^2)),
+              new_center_z = max(center_z),
+            .groups = "drop"
+          ) 
+  
+  ## Store results
+  updated_dust_all_scans[[paste(img_name)]] <- merged_dust_info
+}
+
+updated_dust_all_scans <- bind_rows(updated_dust_all_scans)
+
+## update with scan order
+updated_dust_all_scans <- updated_dust_all_scans %>% 
+  mutate(scan_order = parse_number(scan_name))
+
+
+```
+
+## See the new dust spots in scan - 007
+
+```{r, message=FALSE, warning=FALSE}
+
+## summarize scan 007 
+df_dust_scan_007 <- updated_dust_all_scans %>% 
+  filter(scan_name == "scan-007.x3p") %>% 
+  select(new_center_x, new_center_y, new_radius, new_center_z)
+
+plot(rast(t(img_list_use$`scan-007.x3p`$surface.matrix)))
+points(df_dust_scan_007$new_center_x, df_dust_scan_007$new_center_y, col = "white", pch = 20)
+symbols(df_dust_scan_007$new_center_x, df_dust_scan_007$new_center_y, circles =df_dust_scan_007$new_radius, inches = FALSE, add = TRUE, fg = "red")
+
+```
+
+## See the new dust spots in Scan - 009
+
+```{r, message=FALSE, warning=FALSE}
+
+## summarize scan 009
+df_dust_scan_009 <- updated_dust_all_scans %>% 
+  filter(scan_name == "scan-160.x3p") %>% 
+  dplyr::select(new_center_x, new_center_y, new_radius, new_center_z) %>% 
+  arrange(desc(new_radius))
+
+plot(rast(t(img_list_use$`scan-160.x3p`$surface.matrix)))
+points(df_dust_scan_009$new_center_x, df_dust_scan_009$new_center_y, col = "white", pch = 20)
+symbols(df_dust_scan_009$new_center_x, df_dust_scan_009$new_center_y, circles =df_dust_scan_009$new_radius, inches = FALSE, add = TRUE, fg = "red")
+
+###################### plot the points with larger radius #############################
+
+plot(rast(t(img_list_use$`scan-160.x3p`$surface.matrix)))
+
+points(df_dust_scan_009$new_center_x[1:4], df_dust_scan_009$new_center_y[1:4], col = "white", pch = 20)
+symbols(df_dust_scan_009$new_center_x[1:4], df_dust_scan_009$new_center_y[1:4], circles =df_dust_scan_009$new_radius[1:4], inches = FALSE, add = TRUE, fg = "red")
+
+## it is clear that these points make no sense. we can remove them. 
+```
+
+## Filter out the dust spots that has very large radius from all images
+
+But, in here, we will lose the sequential nature of the cluster numbers since some clusters gets deleted due to larger radius. This could cause problems in further analysis.
+
+```{r}
+## filter out all dust spots that has a radius greater than 250.
+
+updated_dust_all_scans_filtered <- updated_dust_all_scans %>% 
+  filter(new_radius < 250)
+```
+
+## Mapping the coordinates of dust from one image to other
+
+```{r, message=FALSE, warning=FALSE}
+
+updated_dust_all_scans_filtered %>% 
+  filter(scan_name %in% c("scan-006.x3p", "scan-007.x3p", "scan-008.x3p",
+  "scan-009.x3p", "scan-010.x3p", "scan-011.x3p")) %>% 
+  ggplot(aes(new_center_x, new_center_y, col = scan_name)) + geom_point()
+
+updated_dust_all_scans_filtered %>% 
+  filter(scan_name =="scan-006.x3p") %>% 
+  ggplot(aes(new_center_x, new_center_y)) + geom_point()
+
+```
+
+Based on the above figure, it is clear that we need a bigger radius than 50 in order to identify the dust clusters that is there in all 5 images. That is minPnts = 5
+
+```{r, message=FALSE, warning=FALSE}
+
+## consider the 1st 5 scans. And use minPnts = 5 and eps =100 run a dbscan again to map the labels across these 5 scans. 
+
+updated_dust_all_scans_1st_five <- updated_dust_all_scans_filtered %>% 
+  filter(scan_name %in% c("scan-006.x3p", "scan-007.x3p", "scan-008.x3p",
+  "scan-009.x3p", "scan-010.x3p"))
+  
+result <- dbscan(updated_dust_all_scans_1st_five[,c("new_center_x" , "new_center_y" )],           minPts = 5,
+          eps = 100)
+
+df <- updated_dust_all_scans_1st_five %>% 
+  mutate(cluster = result$cluster) %>% 
+  filter(cluster != 0)
+
+test <- ifelse(test = df$scan_name == "scan-006.x3p","red", 
+       ifelse(test = df$scan_name == "scan-007.x3p", "blue",
+       ifelse(test = df$scan_name == "scan-008.x3p", "yellow",
+       ifelse(test = df$scan_name == "scan-009.x3p", "orange","black"))))
+
+plot(rast(t(img_list_use$`scan-006.x3p`$surface.matrix)))
+points(df[,c("new_center_x", "new_center_y")], col = test, pch = 20)
+
+
+df<- df %>% 
+  arrange(cluster, decreasing = F)
+
+df1 <- df %>% 
+  filter(cluster == 1)
+
+df2 <- df %>% 
+  filter(cluster == 2)
+
+df3 <- df %>% 
+  filter(cluster == 3)
+
+df4 <- df %>% 
+  filter(cluster == 4)
+
+
+plot(rast(t(img_list_use$`scan-006.x3p`$surface.matrix)))
+lines(df1[,c("new_center_x", "new_center_y")], col = "red", type = "o",
+      pch = 20)
+lines(df2[,c("new_center_x", "new_center_y")], col = "yellow", type = "o",
+      pch = 20)
+lines(df3[,c("new_center_x", "new_center_y")], col = "white", type = "o",
+      pch = 20)
+lines(df4[,c("new_center_x", "new_center_y")], col = "orange", type = "o",
+      pch = 20)
+
+text(df$new_center_x, df$new_center_y, labels = df$new_dust_label, pos = 3, cex = 0.7, col = "black")
+
+```
+
+But the above method requires to have a minimum number of points that detects a points as a core point in a DBSCAN algorithm around a certain radius. And, its not sure what values are to be used for these parameters. Thus, we suggest to use a regular cluster analysis based on a certain distance measure.
+
+Initially, we consider all the centers we identified in scan 006 as clusters and sequentially (one image at a tine) we try to merge the new dust coordinates in the new scan to the existing clusters in scan 006 using the Euclidean distance. if there is a new point that is not closer to any cluster, ( we compare the distances from the new point to the centroids of all the clusters specified in scan 006 and if the minimum of those distances are greater than a threshold, that new point will be assigned a new label as a new cluster ) then it will be assigned a new label and considered as a new dust spot (cluster).
+
+```{r}
+
+gel_01_dust_data %>%
+  mutate(scan_order = abs(parse_number(scan_name))) %>% 
+  group_by(scan_order) %>% 
+  summarise(number_of_dust = n()) %>% 
+  ggplot(aes(x = scan_order, y = number_of_dust)) + geom_line() + geom_point()
+
+x = gel_01_dust_data %>%
+  mutate(scan_order = abs(parse_number(scan_name))) %>% 
+  group_by(scan_order) %>% 
+  summarise(number_of_dust = n()) %>% 
+  arrange(desc(number_of_dust)) 
+
+x %>% 
+  ggplot(aes(scan_order, y = number_of_dust)) + geom_bar(stat = "identity", col = "blue", fill = "black") + 
+  theme(axis.text.x = element_text(angle = 90, size = 10))
+
+
+x %>%  
+  filter(number_of_dust ==10) ## no scans with 0 dust spots
+
+
+```
+
+Even though you see no vertical bars at some scans, it doesn't mean they don't have dust on them, those values are comparatively small.
+
+```{r}
+
+## define a threshold as the max radius of all dust spots
+radius_threshold <- max(updated_dust_all_scans_filtered$new_radius)
+
+## Get ordered list of scans
+scans <- updated_dust_all_scans_filtered %>%
+  arrange(-scan_order) %>%
+  pull(scan_name) %>%
+  unique()
+
+## Initialize clusters from first scan. But here the cluster labels starts from 2, not 1. so we need to relable them
+initial_scan <- scans[1]
+initial_points <- updated_dust_all_scans_filtered %>%
+  filter(scan_name == initial_scan)
+
+## Assign new cluster IDs starting from 1 of the scan 006
+initial_clusters <- initial_points %>%
+  mutate(cluster = as.character(dense_rank(new_dust_label)))
+
+## Track the next available cluster ID
+next_cluster_id <- max(as.integer(initial_clusters$cluster)) + 1
+
+## Initialize cluster centers from initial scan (scan-006)
+cluster_centers <- initial_clusters %>%
+  group_by(cluster) %>%
+  summarise(
+    x = mean(new_center_x),
+    y = mean(new_center_y),
+    z = max(new_center_z),
+    .groups = "drop"
+  )
+
+## Initialize updated_df with cluster labels for first scan
+updated_df <- updated_dust_all_scans_filtered %>%
+  left_join(initial_clusters %>% select(scan_name, new_dust_label, cluster),
+            by = c("scan_name", "new_dust_label"))
+
+## start the Loop through remaining scans one at a time
+for (scan in scans[-1]) {
+  new_points <- updated_dust_all_scans_filtered %>%
+    filter(scan_name == scan)
+
+  ## create a function to assign each point to the nearest cluster if within threshold, if the minimum distance greater than the threshold, will be a new cluster (the dust)
+  assign_clusters <- function(px, py, threshold) {
+    if (nrow(cluster_centers) == 0) return(NA_character_)
+    dists <- sqrt((cluster_centers$x - px)^2 + (cluster_centers$y - py)^2)
+    min_dist <- min(dists)
+    if (min_dist > threshold) {
+      return(NA_character_)
+    } else {
+      return(cluster_centers$cluster[which.min(dists)])
+    }
+  }
+
+  ## Assign clusters
+  assigned <- new_points %>%
+    rowwise() %>%
+    mutate(assigned_cluster = assign_clusters(new_center_x, new_center_y, radius_threshold)) %>%
+    ungroup()
+
+  ## Split assigned and unassigned points from the assigned dataset
+  new_cluster_points_assigned <- assigned %>%
+    filter(!is.na(assigned_cluster)) %>%
+    mutate(cluster = assigned_cluster)
+
+  new_cluster_points_unassigned <- assigned %>%
+    filter(is.na(assigned_cluster)) %>%
+    mutate(cluster = as.character(seq(next_cluster_id, length.out = n(), by = 1)))
+
+  ## Update cluster ID counter
+  next_cluster_id <- next_cluster_id + nrow(new_cluster_points_unassigned)
+
+  ## Combine both
+  new_cluster_points <- bind_rows(new_cluster_points_assigned,
+                                  new_cluster_points_unassigned)
+
+  ## Update the main dataframe
+  updated_df <- updated_df %>%
+    rows_update(
+      new_cluster_points %>% select(scan_name, new_dust_label, cluster),
+      by = c("scan_name", "new_dust_label")
+    )
+
+  ## Recompute cluster centers to get the distances for the 2nd iteration.
+  cluster_summary <- updated_df %>%
+    filter(!is.na(cluster)) %>%
+    group_by(cluster) %>%
+    summarise(
+      center_x = mean(new_center_x),
+      center_y = mean(new_center_y),
+      radius = max(sqrt((new_center_x - mean(new_center_x))^2 + (new_center_y - mean(new_center_y))^2)),
+      .groups = "drop"
+    )
+
+  cluster_centers <- cluster_summary %>%
+    select(cluster, x = center_x, y = center_y) %>%
+    left_join(
+      updated_df %>%
+        filter(!is.na(cluster)) %>%
+        group_by(cluster) %>%
+        summarise(z = max(new_center_z), .groups = "drop"),
+      by = "cluster"
+    )
+}
+
+## Final join to attach cluster metadata to updated_df (this one only has the updated centers)
+updated_df1 <- updated_df %>%
+  left_join(cluster_centers, by = "cluster") %>%
+  left_join(
+    updated_df %>%
+      filter(!is.na(cluster)) %>%
+      group_by(cluster) %>%
+      summarise(
+        radius = max(sqrt((new_center_x - mean(new_center_x))^2 + (new_center_y - mean(new_center_y))^2)),
+        .groups = "drop"
+      ),
+    by = "cluster"
+  )
+
+## Check cluster numbers
+sort(as.numeric(unique(updated_df$cluster)), decreasing = FALSE)
+
+
+
+```
+
+## Dust frequencies 
+
+```{r}
+updated_df1 %>% 
+  group_by(cluster) %>% 
+  summarise(count = n()) %>% 
+  arrange(desc(count)) %>% 
+  mutate(cluster = fct_reorder(cluster, as.numeric(cluster))) %>% 
+  ggplot(aes(x = cluster, y = count)) + geom_bar(stat = "identity", fill = "blue",
+                                                 col = "grey") +
+  labs(title = "Dust Frequency distribution")+
+  theme(axis.text.x = element_text(angle = 90, size = 7, face = 2),
+        plot.title = element_text(hjust = 0.5))
+
+```
+
+## Plotting
+
+```{r}
+
+## Visualize a few clusters 
+updated_df %>%
+  filter(cluster %in% c("1", "47", "50")) %>%
+  ggplot(aes(new_center_x, new_center_y)) +
+  geom_point(aes(color = factor(cluster))) +
+  labs(color = "Cluster")
+
+## plot the clusters in 1st 25 scans
+updated_df %>% 
+  filter(scan_order %in% c(-1:-25)) %>% 
+  ggplot(aes(x = new_center_x, y = new_center_y, color = cluster)) + geom_point()
+```
